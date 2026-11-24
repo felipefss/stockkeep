@@ -1,0 +1,310 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Security Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && isEmailVerified() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidFoodGroup(group) {
+      return group in [
+        'Water & Hydration',
+        'Grains & Starches',
+        'Proteins & Legumes',
+        'Fruits & Vegetables',
+        'Dairy & Alternatives',
+        'Fats, Oils & Condiments',
+        'Ready-to-Eat Meals'
+      ];
+    }
+
+    function isValidItemStatus(status) {
+      return status in ['active', 'consumed', 'discarded'];
+    }
+
+    function isValidDigestFrequency(freq) {
+      return freq in ['immediate', 'daily', 'weekly'];
+    }
+
+    function isValidChannel(ch) {
+      return ch in ['push', 'email', 'webhook'];
+    }
+
+    function isValidDeliveryStatus(st) {
+      return st in ['delivered', 'logged_unconfigured', 'failed'];
+    }
+
+    function isValidLocale(loc) {
+      return loc in ['en', 'pt-BR', 'es', 'fr', 'de'];
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'emailNotificationsEnabled',
+          'pushNotificationsEnabled',
+          'alertThresholdDays',
+          'digestFrequency',
+          'householdSize',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'emailNotificationsEnabled',
+          'pushNotificationsEnabled',
+          'alertThresholdDays',
+          'digestFrequency',
+          'webhookUrl',
+          'householdSize',
+          'preferredLocale',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.uid is string &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.email is string &&
+        data.email.size() >= 3 &&
+        data.email.size() <= 160 &&
+        data.displayName is string &&
+        data.displayName.size() >= 1 &&
+        data.displayName.size() <= 100 &&
+        data.emailNotificationsEnabled is bool &&
+        data.pushNotificationsEnabled is bool &&
+        data.alertThresholdDays is int &&
+        data.alertThresholdDays >= 1 &&
+        data.alertThresholdDays <= 365 &&
+        data.digestFrequency is string &&
+        isValidDigestFrequency(data.digestFrequency) &&
+        (!('webhookUrl' in data) || (data.webhookUrl is string && data.webhookUrl.size() <= 300)) &&
+        data.householdSize is int &&
+        data.householdSize >= 1 &&
+        data.householdSize <= 50 &&
+        (!('preferredLocale' in data) || (data.preferredLocale is string && data.preferredLocale.size() >= 2 && data.preferredLocale.size() <= 10 && isValidLocale(data.preferredLocale))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPantryItem(data) {
+      return data.keys().hasAll([
+          'userId',
+          'name',
+          'foodGroup',
+          'quantity',
+          'targetMinQuantity',
+          'unit',
+          'caloriesPerUnit',
+          'storageLocation',
+          'expirationDate',
+          'notes',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'name',
+          'foodGroup',
+          'quantity',
+          'targetMinQuantity',
+          'unit',
+          'caloriesPerUnit',
+          'storageLocation',
+          'expirationDate',
+          'notes',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string &&
+        data.userId == request.auth.uid &&
+        data.name is string &&
+        data.name.size() >= 1 &&
+        data.name.size() <= 120 &&
+        data.foodGroup is string &&
+        isValidFoodGroup(data.foodGroup) &&
+        data.quantity is number &&
+        data.quantity >= 0 &&
+        data.quantity <= 100000 &&
+        data.targetMinQuantity is number &&
+        data.targetMinQuantity >= 0 &&
+        data.targetMinQuantity <= 100000 &&
+        data.unit is string &&
+        data.unit.size() >= 1 &&
+        data.unit.size() <= 24 &&
+        data.caloriesPerUnit is number &&
+        data.caloriesPerUnit >= 0 &&
+        data.caloriesPerUnit <= 50000 &&
+        data.storageLocation is string &&
+        data.storageLocation.size() <= 80 &&
+        data.expirationDate is string &&
+        data.expirationDate.size() == 10 &&
+        data.expirationDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.notes is string &&
+        data.notes.size() <= 300 &&
+        data.status is string &&
+        isValidItemStatus(data.status) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidNotificationLog(data) {
+      return data.keys().hasAll([
+          'userId',
+          'channel',
+          'recipient',
+          'subject',
+          'itemCount',
+          'deliveryStatus',
+          'summary',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'channel',
+          'recipient',
+          'subject',
+          'itemCount',
+          'deliveryStatus',
+          'summary',
+          'createdAt'
+        ]) &&
+        data.userId is string &&
+        data.userId == request.auth.uid &&
+        data.channel is string &&
+        isValidChannel(data.channel) &&
+        data.recipient is string &&
+        data.recipient.size() <= 160 &&
+        data.subject is string &&
+        data.subject.size() >= 1 &&
+        data.subject.size() <= 160 &&
+        data.itemCount is int &&
+        data.itemCount >= 0 &&
+        data.itemCount <= 1000 &&
+        data.deliveryStatus is string &&
+        isValidDeliveryStatus(data.deliveryStatus) &&
+        data.summary is string &&
+        data.summary.size() >= 1 &&
+        data.summary.size() <= 500 &&
+        data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Private User Profiles & Notification Preferences (PII isolated)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'email',
+          'displayName',
+          'emailNotificationsEnabled',
+          'pushNotificationsEnabled',
+          'alertThresholdDays',
+          'digestFrequency',
+          'webhookUrl',
+          'householdSize',
+          'preferredLocale',
+          'updatedAt'
+        ]);
+      allow delete: if isValidId(userId) && isOwner(userId);
+    }
+
+    // Emergency Food Stock Items
+    match /pantry_items/{itemId} {
+      allow get: if isValidId(itemId) && isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+      allow create: if isValidId(itemId) &&
+        isSignedIn() &&
+        isEmailVerified() &&
+        isValidPantryItem(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(itemId) &&
+        isSignedIn() &&
+        isEmailVerified() &&
+        isValidPantryItem(incoming()) &&
+        existing().userId == request.auth.uid &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action: Full Item Edit
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name',
+            'foodGroup',
+            'quantity',
+            'targetMinQuantity',
+            'unit',
+            'caloriesPerUnit',
+            'storageLocation',
+            'expirationDate',
+            'notes',
+            'status',
+            'updatedAt'
+          ]) ||
+          // Action: Quick Quantity Adjust
+          incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'updatedAt']) ||
+          // Action: Rotate / Status Change
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'quantity', 'updatedAt'])
+        );
+      allow delete: if isValidId(itemId) && isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+    }
+
+    // Notification Alert History Logs
+    match /notification_logs/{logId} {
+      allow get: if isValidId(logId) && isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+      allow create: if isValidId(logId) &&
+        isSignedIn() &&
+        isEmailVerified() &&
+        isValidNotificationLog(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(logId) && isSignedIn() && isEmailVerified() && existing().userId == request.auth.uid;
+    }
+  }
+}
